@@ -1,0 +1,139 @@
+---
+title: "Examing fat2(kug) expression in the ORN single-cell RNA-seq datasets"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+library(ggridges)
+library(ggrepel)
+library(RColorBrewer)
+```
+
+```{r}
+count <- read_tsv("count.tsv") %>% as.data.frame()
+cell <- read_tsv("cell.tsv") %>% as.data.frame()
+```
+```{r}
+genelist <- c("kug", "Apc", "Apc2", "CadN","Orco", "Sema-5c")
+cell_gene <- count[count$genename %in% genelist, ] %>%
+  dplyr::select(-genename) %>%
+  as.matrix() %>%
+  t() %>% 
+  as.data.frame()
+
+colnames(cell_gene) <- count[count$genename %in% genelist, ]$genename
+cell_gene$cell <- rownames(cell_gene)
+
+cell_gene %<>% left_join(cell, by = c("cell" = "cell"))
+
+#write.table(cell_gene, file = "fat2-single-cell-expression.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+
+```{r}
+cell_gene %>% 
+  gather(gene, expression, -cell, -all_types, -stage) %>%
+  ggplot(aes(x = expression, y = gene)) +
+  geom_density_ridges(jittered_points = TRUE) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 30),
+    axis.text.y = element_text(size = 30),
+    axis.ticks.length = unit(0.5, "cm"),
+    axis.title = element_text(size = 40),
+    )
+
+cell_gene %>% 
+  gather(gene, expression, -cell, -all_types, -stage) %>%
+  ggplot(aes(x = expression, y = gene)) +
+  geom_jitter(height = 0.2, width = 0.1, alpha = 0.5) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 30),
+    axis.text.y = element_text(size = 30),
+    axis.ticks.length = unit(0.5, "cm"),
+    axis.title = element_text(size = 40),
+    )
+```
+
+```{r}
+cutoff <- 0.5
+
+fraction <- function(x) {
+  return(length(x[x >= cutoff]) / length(x))
+}
+
+mean.cutoff <- function(x) {
+  if (length(x[x >= cutoff]) == 0) {
+    return(0)
+    } else {
+      return(mean(x[x >= cutoff])) 
+      }
+}
+```
+
+
+```{r}
+count.fraction <- cell_gene %>%
+  dplyr::filter(all_types != "NaN") %>%
+  dplyr::select(-cell) %>%
+  dplyr::group_by(all_types, stage) %>%
+  dplyr::summarize_all(fraction) %>%
+  gather(gene, fraction, -all_types, -stage) 
+
+count.mean <- cell_gene %>%
+  dplyr::filter(all_types != "NaN") %>%
+  dplyr::select(-cell) %>%
+  dplyr::group_by(all_types, stage) %>%
+  dplyr::summarize_all(mean.cutoff) %>%
+  gather(gene, mean, -all_types, -stage) 
+
+count.sum <- 
+  dplyr::left_join(count.fraction, count.mean) 
+
+count.sum$gene %<>% factor(levels = genelist)
+count.sum$stage %<>% factor(levels = c("24h", "42h", "adult"))
+
+type_order <- cell_gene %>%
+  dplyr::filter(all_types != "NaN") %>%
+  dplyr::select(-cell) %>%
+  dplyr::group_by(all_types) %>%
+  dplyr::count() %$%
+  all_types %>%
+  rev()
+count.sum$all_types %<>% factor(levels = type_order)
+```
+
+
+```{r, fig.height=12}
+count.sum %>%
+  ggplot(aes(x = gene, y = all_types, colour = mean, size = fraction)) +
+  geom_point() +
+  #scale_size_area(max_size = 10) +
+  scale_radius(range = c(1, 10)) +
+  scale_color_gradientn(colors = brewer.pal(9, "YlOrRd")) +
+  #scale_color_gradient(low="yellow", high="red") +
+  xlab("") +
+  ylab("") +
+  labs(title = "ORN over development") +
+  facet_wrap(~stage, strip.position = "bottom", scales = "free_y", nrow = 1) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 15, angle = 45, vjust = 1, hjust = 1),
+    axis.text.y = element_text(size = 15),
+    axis.ticks.length = unit(0.5, "cm"),
+    legend.title = element_text(size = 20),
+    legend.text = element_text(size = 15),
+    legend.key.size = unit(1, "cm"),
+    title = element_text(size = 30),
+    strip.text = element_text(size = 20),
+    aspect.ratio = 6,
+    ) 
+
+ggsave("fat2 expression in ORNs over development.pdf", plot = last_plot(), device = "pdf", dpi = 300)
+```
+
